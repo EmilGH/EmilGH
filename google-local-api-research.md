@@ -12,13 +12,14 @@ The [Places API (New)](https://developers.google.com/maps/documentation/places/w
 
 ### Key Endpoints
 
-| Endpoint | Purpose |
-|---|---|
-| **Text Search (New)** | Search for places by query string (e.g., "best coffee shops in Austin") |
-| **Nearby Search (New)** | Find places within a radius of a location |
-| **Place Details (New)** | Get full details for a specific place by Place ID |
-| **Place Photos (New)** | Retrieve photos associated with a place |
-| **Autocomplete (New)** | Suggest places as the user types |
+| Endpoint | HTTP Method | URL | Purpose |
+|---|---|---|---|
+| **Text Search (New)** | POST | `places.googleapis.com/v1/places:searchText` | Search by query string (e.g., "best coffee shops in Austin") |
+| **Nearby Search (New)** | POST | `places.googleapis.com/v1/places:searchNearby` | Find places within a radius by type |
+| **Place Details (New)** | GET | `places.googleapis.com/v1/places/{placeId}` | Full details for a known place |
+| **Place Photos** | GET | `places.googleapis.com/v1/{photoReference}/media` | Retrieve photos for a place |
+| **Autocomplete (New)** | POST | `places.googleapis.com/v1/places:autocomplete` | Predictive place search |
+| **Places Aggregate** | POST | `areainsights.googleapis.com/v1:computeInsights` | Aggregate counts/IDs matching criteria in an area |
 
 ### Data Available Per Place
 
@@ -30,7 +31,10 @@ The [Places API (New)](https://developers.google.com/maps/documentation/places/w
 - Place types/categories
 - Geographic coordinates
 - Google Maps URL
-- Editorial summaries
+- Editorial summaries and AI-powered (Gemini) summaries
+- Deep links to Google Maps (`googleMapsLinks` — Preview)
+- Moved-place indicators (`movedPlace` / `movedPlaceId`)
+- Relational location info (`addressDescriptor` — nearby landmarks, containing areas)
 
 ### How It Works for a Custom Guide
 
@@ -45,29 +49,53 @@ The [Places API (New)](https://developers.google.com/maps/documentation/places/w
 
 Google restructured Maps Platform pricing in March 2025:
 
-### Tiers
+### Free Monthly Thresholds
 
-| Tier | Free Threshold | Notes |
+| Tier | Free Requests/Month | Notes |
 |---|---|---|
-| **Essentials** | 10,000 events/month | Basic place data (IDs, names, locations) |
-| **Pro** | Lower free tier | Advanced fields (reviews, photos, hours) |
-| **Enterprise** | Lowest free tier | Premium data |
+| **Essentials** | 10,000 | Basic place data (IDs, names, locations) |
+| **Pro** | 5,000 | Advanced fields (display name, business status, etc.) |
+| **Enterprise** | 1,000 | Reviews, hours, ratings, phone, website |
+
+### Approximate Pay-As-You-Go Pricing (per 1,000 requests)
+
+| SKU | ~Cost per 1K |
+|---|---|
+| Place Details Essentials (IDs Only) | Free |
+| Place Details Essentials | ~$5 |
+| Place Details Pro | ~$17 |
+| Place Details Enterprise | ~$20–25 |
+| Place Details Enterprise + Atmosphere | ~$25–32 |
+| Text Search Pro | ~$32 |
+| Nearby Search Pro | ~$32 |
+| Autocomplete (per request) | ~$2.83 |
+| Autocomplete (session-based) | Bundled with Place Details |
+| Place Photos | ~$7 |
+
+Volume discounts scale from 100K to 5M+ monthly events (up to ~90% off at highest volumes).
 
 ### Cost Control with Field Masks
 
-Requests are billed based on which fields you request, not a flat rate:
+Every request **requires** a field mask via the `X-Goog-FieldMask` header. You are billed at the **highest tier** you touch — if you request one Essentials field and one Enterprise field, you pay the Enterprise rate.
 
-- **IDs Only** — cheapest (just Place IDs)
-- **Location** — coordinates added
-- **Basic** — name, address, hours, etc.
-- **Advanced** — reviews, photos, price level
-- **Preferred** — most expensive, all fields
+**Field tier examples:**
+- **Essentials**: `addressComponents`, `formattedAddress`, `location`, `types`
+- **Pro**: `displayName`, `businessStatus`, `googleMapsUri`, `primaryType`
+- **Enterprise**: `currentOpeningHours`, `internationalPhoneNumber`, `priceLevel`, `rating`, `websiteUri`
+- **Enterprise + Atmosphere**: `reviews`, `editorialSummary`, `generativeSummary`, `delivery`, `dineIn`
 
 **Tip**: Only request the fields you need to minimize cost.
 
 ### Subscription Plans
 
-Google now offers Starter, Essentials, and Pro subscription plans as an alternative to pay-as-you-go. Useful if you have predictable usage.
+Google offers Essentials (~$275/mo for 100K calls) and Pro (~$1,200/mo for 250K calls) subscription plans. Enrollment window: Nov 2025 – March 2026.
+
+### Cost Example for a Guide App
+
+10,000 monthly users × 3 sessions × (5 searches + 3 detail views):
+- Text Search: 150K requests × $0.032 = **~$4,800/mo**
+- Place Details: 90K requests × $0.017 = **~$1,530/mo**
+- **Total: ~$6,330/mo** (before volume discounts)
 
 For full pricing details: [Google Maps Platform Pricing](https://mapsplatform.google.com/pricing/)
 
@@ -92,10 +120,12 @@ This means your guide **cannot pre-build a database** of places from Google. You
 - You must show Google attribution and third-party data provider credits
 - You must display review author information and links
 
-### Rate Limits
+### Rate Limits & Result Limits
 
-- Default quota limits apply per project
-- Can request quota increases through Google Cloud Console
+- **Nearby/Text Search**: 20 results per request, hard cap of 60 per query (via `nextPageToken` pagination)
+- **Autocomplete**: Up to 5 predictions per request
+- **Places Aggregate**: Returns place IDs only when count is 100 or fewer; default 1,200 QPM
+- Rate limits are per method, per project, per minute — adjustable in the Cloud Console
 
 For full terms: [Google Maps Platform Terms of Service](https://cloud.google.com/maps-platform/terms)
 
@@ -103,17 +133,24 @@ For full terms: [Google Maps Platform Terms of Service](https://cloud.google.com
 
 ## 4. Other Relevant Google APIs
 
-| API | Use Case |
-|---|---|
-| [Google Business Profile API](https://developers.google.com/my-business) | Manage your **own** business listings (not for reading others' data; requires approval) |
-| [Maps JavaScript API](https://developers.google.com/maps/documentation/javascript) | Embed interactive maps in web apps |
-| [Geocoding API](https://developers.google.com/maps/documentation/geocoding) | Convert addresses to coordinates and vice versa |
-| [Directions API](https://developers.google.com/maps/documentation/directions) | Get routes between places |
-| [Routes API](https://developers.google.com/maps/documentation/routes) | Newer routing API with more features |
+| API | Use Case | Pricing Tier |
+|---|---|---|
+| [Google Business Profile API](https://developers.google.com/my-business) | Manage your **own** business listings (requires approval) | Free (restricted) |
+| [Maps JavaScript API](https://developers.google.com/maps/documentation/javascript) | Embed interactive maps in web apps | Essentials (~$7/1K loads) |
+| [Maps SDK for Android/iOS](https://developers.google.com/maps/documentation/android-sdk) | Native mobile map rendering | Free (unlimited) |
+| [Geocoding API](https://developers.google.com/maps/documentation/geocoding) | Convert addresses to coordinates and vice versa | Essentials (~$5/1K) |
+| [Directions API](https://developers.google.com/maps/documentation/directions) | Get routes between places | Essentials–Enterprise |
+| [Routes API](https://developers.google.com/maps/documentation/routes) | Newer routing API with more features | Essentials–Enterprise |
+| [Address Validation API](https://developers.google.com/maps/documentation/address-validation) | Verify and standardize addresses | Pro (~$17/1K) |
+| [Places Aggregate API](https://developers.google.com/maps/documentation/places-aggregate) | Count/identify places matching criteria in an area | Enterprise |
+
+### Places Aggregate API (Notable for Guides)
+
+Answers questions like "How many 5-star restaurants are within 2km of this location?" Supports filtering by type, status, price level, and ratings. Useful for heatmaps, density analysis, and competitive landscape features.
 
 ### Google Local Guides Program
 
-The [Google Local Guides](https://maps.google.com/localguides/) program is a community contribution program — there is **no API** to access Local Guides data or contributions programmatically.
+The [Google Local Guides](https://maps.google.com/localguides/) program is a community contribution program — there is **no API** to access Local Guides data or contributions programmatically. The only data export option is [Google Takeout](https://takeout.google.com/) (manual bulk export of your own contributions).
 
 ---
 
@@ -121,21 +158,45 @@ The [Google Local Guides](https://maps.google.com/localguides/) program is a com
 
 If Google's caching restrictions, display requirements, or pricing are too limiting:
 
+### Commercial Alternatives
+
 | Alternative | Strengths |
 |---|---|
-| **[Foursquare Places API](https://foursquare.com/)** | Large POI database, more flexible caching, no map display requirement |
-| **[HERE Places API](https://developer.here.com/)** | Strong mapping platform, enterprise-friendly terms |
-| **[Yelp Fusion API](https://docs.developer.yelp.com/)** | Rich review data, restaurant/service focused |
-| **[OpenStreetMap / Overpass API](https://overpass-api.de/)** | Free, open data, no caching restrictions, community-maintained |
-| **[SerpApi (Google Local)](https://serpapi.com/google-local-services-api)** | Scrapes Google Local results into structured JSON |
-| **[Outscraper](https://outscraper.com/)** | Scrapes Google Maps data including unlimited reviews |
-| **[Local Business Data (RapidAPI)](https://rapidapi.com/letscrape-6bRBa3QguO5/api/local-business-data)** | Real-time Google Maps/POI data via API |
+| **[Foursquare Places API](https://foursquare.com/)** | 105M+ POIs, 190 countries; rich foot-traffic data; powers Apple Maps; flexible caching |
+| **[HERE Places API](https://developer.here.com/)** | 120M+ POIs; strong routing integration; enterprise-friendly terms |
+| **[Yelp Fusion API](https://docs.developer.yelp.com/)** | Best-in-class review data; free tier (5,000 calls/day) |
+| **[TomTom Search API](https://developer.tomtom.com/)** | ~$0.50/1K requests — up to 40× cheaper than Google |
+| **[Geoapify Places API](https://www.geoapify.com/)** | 500+ categories; **allows caching/storing data**; works with any map provider |
 
-> **Note**: Scraping-based services (SerpApi, Outscraper, etc.) may violate Google's Terms of Service. Use at your own risk.
+### Free / Open-Source
+
+| Alternative | Strengths |
+|---|---|
+| **[OpenStreetMap / Overpass API](https://overpass-api.de/)** | Free, open data (ODbL license), no caching restrictions |
+| **[Mapbox](https://www.mapbox.com/)** | Beautiful map rendering; good geocoding; freemium |
+
+### Scraping-Based Services
+
+| Alternative | Strengths |
+|---|---|
+| **[SerpApi (Google Local)](https://serpapi.com/google-local-services-api)** | Structured Google Local results as JSON |
+| **[Outscraper](https://outscraper.com/)** | Google Maps data including unlimited reviews |
+| **[Local Business Data (RapidAPI)](https://rapidapi.com/letscrape-6bRBa3QguO5/api/local-business-data)** | Real-time Google Maps/POI data |
+
+> **Warning**: Scraping-based services violate Google's Terms of Service. Use at your own risk.
 
 ---
 
 ## 6. Recommended Approach for a Custom Guide
+
+### Cost Reduction Strategies (if using Google)
+
+1. **Use field masks aggressively** — stay in Essentials tier when possible
+2. **Use Autocomplete sessions** — Autocomplete portion becomes free when bundled with Place Details
+3. **Cache Place IDs** indefinitely (explicitly allowed)
+4. **Use IDs Only SKUs** when you only need to identify places
+5. **Implement client-side caching** of UI state to reduce redundant API calls
+6. **Consider subscription plans** for predictable usage patterns
 
 ### Option A: Google-Centric (Simplest, Most Data)
 
@@ -161,6 +222,15 @@ If Google's caching restrictions, display requirements, or pricing are too limit
 - Community-maintained data (coverage varies by region)
 - **Pros**: Free, full control, no vendor lock-in
 - **Cons**: Less business data (hours, reviews, photos) than Google
+
+### Option D: Hybrid (Best of Both Worlds — Recommended)
+
+- **OpenStreetMap** or **Mapbox** for map rendering (free/cheap)
+- **Foursquare** or **Geoapify** for POI discovery and basic details (cacheable)
+- **Google Places API** only for high-value enrichment (reviews, photos, real-time hours) when a user explicitly taps into a place detail
+- **Yelp Fusion** to supplement review data
+- **Pros**: Cost-effective at scale, cacheable base data, no vendor lock-in on the map
+- **Cons**: More complex architecture, data consistency across sources
 
 ---
 
